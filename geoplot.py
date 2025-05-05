@@ -207,6 +207,48 @@ geoplot_template = """
 				viewer.dataSources.add(dataSource)
 				viewer.zoomTo(dataSource)
 			}
+            
+            const polygonLayers = $polygonLayers;
+            
+            const toggleContainer = document.createElement('div');
+            toggleContainer.style.position = "absolute";
+  			toggleContainer.style.top = "10px";
+ 	 		toggleContainer.style.right = "10px";
+  			toggleContainer.style.background = "white";
+  			toggleContainer.style.padding = "10px";
+  			toggleContainer.style.borderRadius = "8px";
+  			toggleContainer.style.zIndex = "1000";
+  			toggleContainer.style.maxHeight = "300px";
+  			toggleContainer.style.overflowY = "auto";
+            document.body.appendChild(toggleContainer);
+            
+            polygonLayers.forEach(layer => {
+                const color = layer.geojson.properties?.color || "#008000";
+                const geoJsonData = layer.geojson;
+                
+                cesium.GeoJsonDataSource.load(geoJsonData,{
+                    stroke: Cesium.Color.fromCssColorString(color),
+                    fill: Cesium.Color.formCssColorString(color).withAlpha(0.4),
+                    strokeWidth: 2,
+                    clampToGround: true
+                }).then((dataSource) => {
+                    dataSource.name = layer.name;
+                    viewer.dataSources.add(dataSource);
+                    
+                    const checkbox = document.createElement('input');
+                    checkbox.type = "checkbox";
+                    checkbox.checked = true;
+                    checkbox.onchange = () => {
+                        dataSource.show = checkbox.checked;
+                    }
+                    const label = document.createElement('label');
+                    label.style.display = "block";
+                    label.style.fontSize = "14px";
+                    label.appendChild(checkbox);
+                    label.appendChild(document.createTextNode(" " + layer.name));
+                    toggleContainer.appendChild(label);
+                });
+            });
 		</script>
 	</body>
 </html>
@@ -218,7 +260,7 @@ def read_var(state, var):
 
 
 class GeoPlot:
-    def __init__(self, config, options):
+    def __init__(self, config, options, polygon_layers=None):
         self.config = config
         (
             self.cesium_token,
@@ -233,20 +275,18 @@ class GeoPlot:
             options["feature"],
             options["visualization_type"],
         )
+        self.polygon_layers = polygon_layers if polygon_layers else []
 
     def render(self, state_trajectory):
         coords, values = [], []
         name = self.config["simulation_metadata"]["name"]
         geodata_path, geoplot_path = f"{name}.geojson", f"{name}.html"
-
         for i in range(0, len(state_trajectory) - 1):
             final_state = state_trajectory[i][-1]
-
             coords = np.array(read_var(final_state, self.entity_position)).tolist()
             values.append(
                 np.array(read_var(final_state, self.entity_property)).flatten().tolist()
             )
-
         start_time = pd.Timestamp.utcnow()
         timestamps = [
             start_time + pd.Timedelta(seconds=i * self.step_time)
@@ -255,7 +295,6 @@ class GeoPlot:
                 * self.config["simulation_metadata"]["num_steps_per_episode"]
             )
         ]
-
         geojsons = []
         for i, coord in enumerate(coords):
             features = []
@@ -273,11 +312,38 @@ class GeoPlot:
                         },
                     }
                 )
+                if isinstance(coord[0], list):  # Check if it's a polygon
+                    features.append(
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Polygon",
+                                "coordinates": [coord],  # Wrap in another list for GeoJSON format
+                            },
+                            "properties": {
+                                "value": value_list[i],
+                                "time": time.isoformat(),
+                            },
+                        }
+                    )
+                else:  # It's a point
+                    features.append(
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Point",
+                                "coordinates": [coord[1], coord[0]],
+                            },
+                            "properties": {
+                                "value": value_list[i],
+                                "time": time.isoformat(),
+                            },
+                        }
+                    )
             geojsons.append({"type": "FeatureCollection", "features": features})
 
         with open(geodata_path, "w", encoding="utf-8") as f:
             json.dump(geojsons, f, ensure_ascii=False, indent=2)
-
         tmpl = Template(geoplot_template)
         with open(geoplot_path, "w", encoding="utf-8") as f:
             f.write(
@@ -288,6 +354,8 @@ class GeoPlot:
                         "stopTime": timestamps[-1].isoformat(),
                         "data": json.dumps(geojsons),
                         "visualType": self.visualization_type,
+                        "polygonLayers": json.dumps(self.polygon_layers),
                     }
                 )
             )
+
