@@ -226,9 +226,9 @@ geoplot_template = """
                 const color = layer.geojson.properties?.color || "#008000";
                 const geoJsonData = layer.geojson;
                 
-                cesium.GeoJsonDataSource.load(geoJsonData,{
+                Cesium.GeoJsonDataSource.load(geoJsonData,{
                     stroke: Cesium.Color.fromCssColorString(color),
-                    fill: Cesium.Color.formCssColorString(color).withAlpha(0.4),
+                    fill: Cesium.Color.fromCssColorString(color).withAlpha(0.4),
                     strokeWidth: 2,
                     clampToGround: true
                 }).then((dataSource) => {
@@ -281,9 +281,9 @@ class GeoPlot:
         coords, values = [], []
         name = self.config["simulation_metadata"]["name"]
         geodata_path, geoplot_path = f"{name}.geojson", f"{name}.html"
-        for i in range(0, len(state_trajectory) - 1):
-            final_state = state_trajectory[i][-1]
-            coords = np.array(read_var(final_state, self.entity_position)).tolist()
+        for i in range(0, len(state_trajectory)):
+            final_state = state_trajectory
+            coords.extend(read_var(final_state, self.entity_position))
             values.append(
                 np.array(read_var(final_state, self.entity_property)).flatten().tolist()
             )
@@ -299,19 +299,6 @@ class GeoPlot:
         for i, coord in enumerate(coords):
             features = []
             for time, value_list in zip(timestamps, values):
-                features.append(
-                    {
-                        "type": "Feature",
-                        "geometry": {
-                            "type": "Point",
-                            "coordinates": [coord[1], coord[0]],
-                        },
-                        "properties": {
-                            "value": value_list[i],
-                            "time": time.isoformat(),
-                        },
-                    }
-                )
                 if isinstance(coord[0], list):  # Check if it's a polygon
                     features.append(
                         {
@@ -338,8 +325,7 @@ class GeoPlot:
                                 "value": value_list[i],
                                 "time": time.isoformat(),
                             },
-                        }
-                    )
+                        })      
             geojsons.append({"type": "FeatureCollection", "features": features})
 
         with open(geodata_path, "w", encoding="utf-8") as f:
